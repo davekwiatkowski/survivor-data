@@ -61,11 +61,11 @@ const fillOptions = () => {
       if (gameOver) return;
       gameOver = true;
       if (localAnswerIndex === i) {
-        statusElement.innerHTML = `Correct! It was ${answerName}`;
+        statusElement.innerHTML = `Correct! It's ${answerName}`;
         statusElement.classList = "status correct";
         ++score;
       } else {
-        statusElement.innerHTML = `Incorrect. It was ${answerName}`;
+        statusElement.innerHTML = `Incorrect. It's ${answerName}`;
         statusElement.classList = "status incorrect";
       }
 
