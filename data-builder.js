@@ -22,10 +22,8 @@ const getInfoLabels = async (page) => {
   const tableSelector = "#collapsibleTable0 > tbody";
   const categoriesSelector = `${tableSelector} > tr:nth-child(2) > th`;
   const categories = [];
-
   await showAllContestants(page);
   await page.waitForSelector(tableSelector);
-
   const categoryElements = await page.$$(categoriesSelector);
   for (let categoryElement of categoryElements) {
     const categoryText = await page.evaluate(el => el.innerText, categoryElement);
@@ -37,11 +35,8 @@ const getInfoLabels = async (page) => {
 const getPlayersData = async (page, infoLabels) => {
   const rowsSelector = "#collapsibleTable0 > tbody > tr";
   const playersData = [];
-
   await showAllContestants(page);
-
   const rowElements = await page.$$(rowsSelector);
-
   for (let i = 2; i < rowElements.length; ++i) {
     const rowSelector = `${rowsSelector}:nth-child(${i + 1})`;
     const infoValueElements = await page.$$(`${rowSelector} > *`);
@@ -56,14 +51,12 @@ const getPlayersData = async (page, infoLabels) => {
     playersData.push(playerData);
     console.log(`Added data ${i - 1}/${rowElements.length - 2} players.`);
   }
-
   return playersData;
 };
 
 const writeObjectToFile = async (object) => {
   const filePath = "player-data.json";
   const text = `${JSON.stringify(object)}`;
-
   console.log("Writing data to file...");
   await fs.writeFile(filePath, text, (err) => {
     if (err) {
