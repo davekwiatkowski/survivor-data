@@ -59,7 +59,7 @@ img {
   filter: grayscale(100%);
 }
 
-img:hover {
+img:hover, option.answer > img {
   filter: grayscale(0%);
 }
 

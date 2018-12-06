@@ -75,6 +75,9 @@ const fillOptions = () => {
         if (j !== localAnswerIndex) {
           optionsElement.children[j].classList += " remove";
         }
+        else {
+          optionsElement.children[j].classList += " answer";
+        }
       }
     };
     optionsElement.appendChild(item);
