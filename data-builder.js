@@ -1,20 +1,73 @@
 import fs from "fs";
-import gender from "gender";
 import puppeteer from "puppeteer";
 
-const castSectionStart = 3;
-const castUrl = "https://www.truedorktimes.com/survivor/cast/";
-const filePath = "player-data.js";
-const totalSeasons = 37;
+const castUrl = "https://survivor.fandom.com/wiki/List_of_Survivor_contestants";
 
-let playersData = [];
+// Credit: https://jsperf.com/js-camelcase/5
+String.prototype.toCamelCase = function () {
+  return this.replace(/(?:^\w|[A-Z]|\b\w|\s+)/g, (match, index) => {
+    if (/\s+/.test(match)) return "";
+    return index == 0 ? match.toLowerCase() : match.toUpperCase();
+  });
+};
+
+const showAllContestants = async (page) => {
+  const showButtonSelector = "#collapseButton0";
+  await page.goto(castUrl);
+  await page.waitForSelector(showButtonSelector);
+  await page.click(showButtonSelector);
+};
+
+const getInfoLabels = async (page) => {
+  const tableSelector = "#collapsibleTable0 > tbody";
+  const categoriesSelector = `${tableSelector} > tr:nth-child(2) > th`;
+  const categories = [];
+
+  await showAllContestants(page);
+  await page.waitForSelector(tableSelector);
+
+  const categoryElements = await page.$$(categoriesSelector);
+  for (let categoryElement of categoryElements) {
+    const categoryText = await page.evaluate(el => el.innerText, categoryElement);
+    categories.push(categoryText.replace(/\n/g, " ").toCamelCase());
+  }
+  return categories;
+};
+
+const getPlayersData = async (page, infoLabels) => {
+  const rowsSelector = "#collapsibleTable0 > tbody > tr";
+  const playersData = [];
+
+  await showAllContestants(page);
+
+  const rowElements = await page.$$(rowsSelector);
+
+  for (let i = 2; i < rowElements.length; ++i) {
+    const rowSelector = `${rowsSelector}:nth-child(${i + 1})`;
+    const infoValueElements = await page.$$(`${rowSelector} > *`);
+    let playerData = {};
+    for (let j = 0; j < infoLabels.length; ++j) {
+      const infoValueText = await page.evaluate(el => el.innerText, infoValueElements[j + 1]);
+      playerData = { ...playerData, [infoLabels[j]]: infoValueText };
+    }
+    const imageElement = await page.$(`${rowSelector} .image`);
+    const imageSource = await page.evaluate(el => el.href, imageElement);
+    playerData = { ...playerData, profilePictureURL: imageSource };
+    playersData.push(playerData);
+    console.log(`Added data ${i - 1}/${rowElements.length - 2} players.`);
+  }
+
+  return playersData;
+};
 
 const writeObjectToFile = async (object) => {
+  const filePath = "player-data.json";
+  const text = `${JSON.stringify(object)}`;
+
   console.log("Writing data to file...");
-  const text = `const data = ${JSON.stringify(object)};`;
   await fs.writeFile(filePath, text, (err) => {
     if (err) {
-      console.log(err);
+      console.error(err);
       return;
     }
     console.log("Wrote to file.");
@@ -24,85 +77,10 @@ const writeObjectToFile = async (object) => {
 const go = async () => {
   const browser = await puppeteer.launch();
   const page = await browser.newPage();
-
-  await page.goto(castUrl);
-  await page.waitForSelector(".large-9 .postbox");
-  const numCastSections = (await page.$$(".large-9 .postbox")).length;
-
-  for (let j = castSectionStart; j < numCastSections; ++j) {
-    await page.goto(castUrl);
-    for (let k = 0; k < 2; ++k) {
-      await page.goto(castUrl);
-      const linkAreaSelector = `.large-9 .postbox:nth-child(${j}) > .row > .small-12:nth-child(${k + 1}) > .cast > li`;
-      await page.waitForSelector(linkAreaSelector);
-      const numCastMembers = (await page.$$(linkAreaSelector)).length;
-      for (let i = 0; i < numCastMembers; ++i) {
-        await page.goto(castUrl);
-
-        // Navigate to the page for the player (if actionable)
-        await page.waitForSelector(linkAreaSelector);
-        const linkSelector = `${linkAreaSelector}:nth-child(${i + 1}) > a`;
-        try {
-          await page.click(linkSelector);
-        }
-        catch (e) {
-          continue;
-        }
-
-        // Handle 404 error
-        const title = await page.title();
-        if (title === "404 Not Found") {
-          continue;
-        }
-
-        // Title is formatted with: "Survivor ... contestant <name>" 
-        const name = title.match(/contestant .*$/)[0].substring(11);
-        const genderData = gender.guess(name);
-
-        // Get the image of the player
-        await page.waitForSelector("img");
-        const imageElement = (await page.$$("img"))[0];
-        const banner = await page.evaluate(el => el.src, imageElement);
-
-        // Get the bio of the player
-        let bio;
-        let season;
-        for (let s = 1; s <= totalSeasons; ++s) {
-          let bioElement = (await page.$$(`#s${s}bio > .posttext`))[0];
-          if (!bioElement) {
-            bioElement = (await page.$$(`#snz${s}bio > .posttext`))[0];
-          }
-          if (!bioElement) {
-            bioElement = (await page.$$(`#sau${s}bio > .posttext`))[0];
-          }
-
-          if (!!bioElement) {
-            const unformattedBio = await page.evaluate(el => el.innerHTML, bioElement);
-            bio = unformattedBio
-              .replace(/(\r\n\t|\n|\r\t)/gm, "")
-              .replace(/ +/g, " ")
-              .trim();
-            season = s;
-            break;
-          }
-        }
-
-        // Save the data
-        playersData.push({ name, banner, bio, season, genderData });
-        console.log(`Saved data for ${name}, from season ${season}; ${genderData.gender}, ${genderData.confidence}`);
-      }
-    }
-  }
-
-  await browser.close();
-
-  // Add more images for each player
-  for (let d of playersData) {
-    const profile = `${d.banner.substring(0, d.banner.indexOf("-bd3"))}.jpg`;
-    d = { ...d, profile };
-  }
-
+  const infoLables = await getInfoLabels(page);
+  const playersData = await getPlayersData(page, infoLables);
   await writeObjectToFile(playersData);
+  await browser.close();
 };
 
 go();
