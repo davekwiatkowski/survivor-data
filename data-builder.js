@@ -13,7 +13,6 @@ const startTime = Date.now();
 
 const getHref = el => el.href;
 const getInnerText = el => el.innerText;
-const getInnerTextWithoutLinks = el => el.innerText.replace(/\[\d+\]/g, "");
 
 const getTimeTag = () => {
   const ms = (Date.now() - startTime);
@@ -25,6 +24,15 @@ const getTimeTag = () => {
 
 const cLog = (message) => {
   console.log(`${getTimeTag()} ${message}`);
+};
+
+const combineObjectResultsForPromises = async (promises) => {
+  const promiseResults = await Promise.all(promises);
+  let combinedObject = {};
+  for (let pr of promiseResults) {
+    combinedObject = { ...combinedObject, ...pr };
+  }
+  return combinedObject;
 };
 
 const showAllContestants = async (page) => {
@@ -49,39 +57,128 @@ const getInfoLabels = async (page) => {
   return categories;
 };
 
-const getPlayerTriviaData = async (page) => {
-  const contentSelector = "#mw-content-text";
-  await page.waitForSelector(contentSelector);
-  const triviaSelector = `${contentSelector} > ul:last-of-type > li`;
-  const triviaElements = await page.$$(triviaSelector);
-  const promises = [];
-  for (let element of triviaElements) {
-    promises.push(page.evaluate(getInnerTextWithoutLinks, element));
-  }
-  return await Promise.all(promises);
+const getTableColumnData = async (page, infoValueElementsSelector, i, infoLabels) => {
+  const selector = `${infoValueElementsSelector}:nth-child(${i + 2})`;
+  const infoValueElement = await page.$(selector);
+  const infoValueText = await page.evaluate(getInnerText, infoValueElement);
+  return { [infoLabels[i]]: infoValueText };
 };
 
-const getPlayerData = async (page, rowsSelector, i, infoLabels) => {
-  await showAllContestants(page);
-  const rowSelector = `${rowsSelector}:nth-child(${i + 1})`;
-  const infoValueElementsSelector = `${rowSelector} > *`;
-  let playerData = {};
-  for (let j = 0; j < infoLabels.length; ++j) {
-    const infoValueElement = await page.$(`${infoValueElementsSelector}:nth-child(${j + 2})`);
-    const infoValueText = await page.evaluate(getInnerText, infoValueElement);
-    playerData = { ...playerData, [infoLabels[j]]: infoValueText };
-  }
+const getIconPictureURL = async (page, rowSelector) => {
   const imageElement = await page.$(`${rowSelector} .image`);
-  const imageSource = await page.evaluate(getHref, imageElement);
-  playerData = { ...playerData, profilePictureURL: imageSource };
+  const value = await page.evaluate(getHref, imageElement);
+  if (value) {
+    return { iconPictureURL: value };
+  }
+};
+
+const getPlayerTableData = async (page, rowSelector, infoLabels) => {
+  const promises = [];
+  const infoValueElementsSelector = `${rowSelector} > *`;
+  for (let i = 0; i < infoLabels.length; ++i) {
+    promises.push(getTableColumnData(page, infoValueElementsSelector, i, infoLabels));
+  }
+  promises.push(getIconPictureURL(page, rowSelector));
+  return await combineObjectResultsForPromises(promises);
+};
+
+const goToPlayerPage = async (page, rowSelector) => {
   const playerUrlElement = await page.$(`${rowSelector} > th > a`);
   const playerUrl = await page.evaluate(getHref, playerUrlElement);
   await page.goto(playerUrl);
-  const trivia = await getPlayerTriviaData(page);
-  if (trivia.length > 0) {
-    playerData = { ...playerData, trivia };
+  await page.waitForSelector("#mw-content-text");
+};
+
+const onPlayerTriviaDataEvaluate = () => {
+  const selector = "#mw-content-text > ul";
+  const uls = document.querySelectorAll(selector);
+  for (let ul of uls) {
+    if (ul.previousElementSibling.innerText === "Trivia") {
+      const ret = [];
+      for (let li of ul.children) {
+        ret.push(li.innerText.replace(/\[\d+\]/g, ""));
+      }
+      return ret;
+    }
   }
-  return playerData;
+};
+
+const getPlayerTriviaData = async (page) => {
+  const value = await page.evaluate(onPlayerTriviaDataEvaluate);
+  if (value) {
+    return { trivia: value };
+  }
+};
+
+const onPlayerGenderEvaluate = () => {
+  const FEMALE = "Female";
+  const MALE = "Male";
+  const selector = "header .page-header__categories-links > a";
+  const links = document.querySelectorAll(selector);
+  for (let l of links) {
+    const text = l.innerText;
+    if (text.includes(FEMALE)) {
+      return FEMALE;
+    }
+    if (text.includes(MALE)) {
+      return MALE;
+    }
+  }
+};
+
+const getPlayerGender = async (page) => {
+  const value = await page.evaluate(onPlayerGenderEvaluate);
+  if (value) {
+    return { gender: value };
+  }
+};
+
+const onPlayerOccupationEvaluate = () => {
+  const selector = "#mw-content-text > aside section > .pi-item > .pi-data-value";
+  const elements = document.querySelectorAll(selector);
+  for (let el of elements) {
+    if (el.previousElementSibling.innerText === "Occupation:") {
+      return el.innerText;
+    }
+  }
+};
+
+const getPlayerOccupation = async (page) => {
+  const value = await page.evaluate(onPlayerOccupationEvaluate);
+  if (value) {
+    return { occupation: value };
+  }
+};
+
+const onPlayerFullPictureURLEvaluate = () => {
+  const selector = "#mw-content-text > aside figure > a";
+  const element = document.querySelector(selector);
+  return element.href;
+};
+
+const getPlayerFullPictureURL = async (page) => {
+  const value = await page.evaluate(onPlayerFullPictureURLEvaluate);
+  if (value) {
+    return { fullPictureURL: value };
+  }
+};
+
+const getPlayerPageData = async (page) => {
+  return await combineObjectResultsForPromises([
+    getPlayerTriviaData(page),
+    getPlayerGender(page),
+    getPlayerOccupation(page),
+    getPlayerFullPictureURL(page)
+  ]);
+};
+
+const getPlayerData = async (page, rowsSelector, i, infoLabels) => {
+  const rowSelector = `${rowsSelector}:nth-child(${i + 1})`;
+  await showAllContestants(page);
+  const playerBasicData = await getPlayerTableData(page, rowSelector, infoLabels);
+  await goToPlayerPage(page, rowSelector);
+  const playerPageData = await getPlayerPageData(page);
+  return { ...playerBasicData, ...playerPageData };
 };
 
 const getPlayersData = async (page, infoLabels) => {
@@ -110,7 +207,17 @@ const writeObjectToFile = async (object) => {
 };
 
 const onPageRequest = req => {
-  const resourcesToBlock = ["image", "stylesheet", "media", "font", "texttrack", "object", "beacon", "csp_report", "imageset"];
+  const resourcesToBlock = [
+    "image",
+    "stylesheet",
+    "media",
+    "font",
+    "texttrack",
+    "object",
+    "beacon",
+    "csp_report",
+    "imageset"
+  ];
   if (resourcesToBlock.indexOf(req.resourceType()) > 0) {
     req.abort();
   }
