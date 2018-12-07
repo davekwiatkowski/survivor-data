@@ -8,6 +8,7 @@
     "build-data": "babel-node data-builder.js"
   },
   "dependencies": {
+    "cli-progress": "^2.1.1",
     "fs": "^0.0.1-security",
     "puppeteer": "^1.11.0"
   },

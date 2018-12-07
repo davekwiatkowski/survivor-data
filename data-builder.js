@@ -1,5 +1,6 @@
 import fs from "fs";
 import puppeteer from "puppeteer";
+import cliProgress from "cli-progress";
 
 // Credit: https://jsperf.com/js-camelcase/5
 String.prototype.toCamelCase = function () {
@@ -9,7 +10,9 @@ String.prototype.toCamelCase = function () {
   });
 };
 
-const startTime = Date.now();
+const progressBar = new cliProgress.Bar({
+  format: "[{bar}] {percentage}% | Time elapsed: {duration}s | Contestants: {value}/{total}",
+}, cliProgress.Presets.legacy);
 
 const getHref = el => el.href;
 const getInnerText = el => el.innerText;
@@ -20,10 +23,6 @@ const getTimeTag = () => {
   const minutes = seconds / 60 | 0;
   const shouldInsert0 = (seconds % 60) < 10;
   return `[${minutes}:${shouldInsert0 ? 0 : ""}${seconds % 60}]`;
-};
-
-const cLog = (message) => {
-  console.log(`${getTimeTag()} ${message}`);
 };
 
 const combineObjectResultsForPromises = async (promises) => {
@@ -185,24 +184,27 @@ const getPlayersData = async (page, infoLabels) => {
   const rowsSelector = "#collapsibleTable0 > tbody > tr";
   await showAllContestants(page);
   const rowElements = await page.$$(rowsSelector);
+  const firstRowIndex = 2;
+  const totalPlayers = rowElements.length - firstRowIndex + 1;
+  progressBar.start(totalPlayers, 0);
   const playersData = [];
-  for (let i = 2; i < rowElements.length; ++i) {
-    cLog(`Gathering data for player ${i - 1}/${rowElements.length - 1}...`);
+  for (let i = firstRowIndex; i < firstRowIndex + totalPlayers; ++i) {
+    const currentPlayerNumber = i - firstRowIndex + 1;
     const playerData = await getPlayerData(page, rowsSelector, i, infoLabels);
     playersData.push(playerData);
+    progressBar.update(currentPlayerNumber);
   }
+  progressBar.stop();
   return playersData;
 };
 
 const writeObjectToFile = async (object) => {
   const filePath = "player-data.json";
   const text = `${JSON.stringify(object)}`;
-  cLog(`Writing data to file...`);
   await fs.writeFile(filePath, text, (err) => {
     if (err) {
       throw err;
     }
-    cLog(`Wrote to file.`);
   });
 };
 
