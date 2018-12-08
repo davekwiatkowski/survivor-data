@@ -10,20 +10,14 @@ String.prototype.toCamelCase = function () {
   });
 };
 
+let playersCompleted = 0;
+
 const progressBar = new cliProgress.Bar({
   format: "[{bar}] {percentage}% | Time elapsed: {duration}s | Contestants: {value}/{total}",
 }, cliProgress.Presets.legacy);
 
 const getHref = el => el.href;
 const getInnerText = el => el.innerText;
-
-const getTimeTag = () => {
-  const ms = (Date.now() - startTime);
-  const seconds = ms / 1000 | 0;
-  const minutes = seconds / 60 | 0;
-  const shouldInsert0 = (seconds % 60) < 10;
-  return `[${minutes}:${shouldInsert0 ? 0 : ""}${seconds % 60}]`;
-};
 
 const combineObjectResultsForPromises = async (promises) => {
   const promiseResults = await Promise.all(promises);
@@ -92,12 +86,16 @@ const onPlayerTriviaDataEvaluate = () => {
   const selector = "#mw-content-text > ul";
   const uls = document.querySelectorAll(selector);
   for (let ul of uls) {
-    if (ul.previousElementSibling.innerText === "Trivia") {
-      const ret = [];
-      for (let li of ul.children) {
-        ret.push(li.innerText.replace(/\[\d+\]/g, ""));
+    let currPrev = ul.previousElementSibling;
+    while (!!currPrev) {
+      if (currPrev.innerText === "Trivia") {
+        const ret = [];
+        for (let li of ul.children) {
+          ret.push(li.innerText.replace(/\[\d+\]/g, ""));
+        }
+        return ret;
       }
-      return ret;
+      currPrev = currPrev.previousElementSibling;
     }
   }
 };
@@ -180,20 +178,37 @@ const getPlayerData = async (page, rowsSelector, i, infoLabels) => {
   return { ...playerBasicData, ...playerPageData };
 };
 
-const getPlayersData = async (page, infoLabels) => {
-  const rowsSelector = "#collapsibleTable0 > tbody > tr";
+const getNumberOfPlayers = async (page, firstRowIndex, rowsSelector) => {
   await showAllContestants(page);
   const rowElements = await page.$$(rowsSelector);
-  const firstRowIndex = 2;
-  const totalPlayers = rowElements.length - firstRowIndex + 1;
-  progressBar.start(totalPlayers, 0);
-  const playersData = [];
-  for (let i = firstRowIndex; i < firstRowIndex + totalPlayers; ++i) {
-    const currentPlayerNumber = i - firstRowIndex + 1;
+  return rowElements.length - firstRowIndex;
+}
+
+const getPlayersDataWorker = async (page, pagesToUse, firstRowIndex, totalPlayers, infoLabels, playersData, rowsSelector, pageIndex) => {
+  const playersPerPage = (totalPlayers / pagesToUse) | 0;
+  const startIndex = firstRowIndex + playersPerPage * pageIndex;
+  const endIndex = pageIndex === pagesToUse - 1
+    ? firstRowIndex + totalPlayers
+    : firstRowIndex + playersPerPage * (pageIndex + 1);
+  for (let i = startIndex; i < endIndex; ++i) {
     const playerData = await getPlayerData(page, rowsSelector, i, infoLabels);
-    playersData.push(playerData);
-    progressBar.update(currentPlayerNumber);
+    playersData[i - firstRowIndex] = playerData;
+    progressBar.update(++playersCompleted);
   }
+};
+
+const getPlayersData = async (pages, infoLabels) => {
+  const firstRowIndex = 2;
+  const rowsSelector = "#collapsibleTable0 > tbody > tr";
+  const totalPlayers = await getNumberOfPlayers(pages[0], firstRowIndex, rowsSelector);
+  progressBar.start(totalPlayers, 0);
+  const playersData = new Array(totalPlayers);
+  const pagesToUse = Math.min(pages.length, totalPlayers);
+  const promises = [];
+  for (let i = 0; i < pagesToUse; ++i) {
+    promises.push(getPlayersDataWorker(pages[i], pagesToUse, firstRowIndex, totalPlayers, infoLabels, playersData, rowsSelector, i));
+  }
+  await Promise.all(promises);
   progressBar.stop();
   return playersData;
 };
@@ -230,11 +245,16 @@ const onPageRequest = req => {
 
 const go = async () => {
   const browser = await puppeteer.launch();
-  const page = await browser.newPage();
-  await page.setRequestInterception(true);
-  page.on("request", onPageRequest);
-  const infoLables = await getInfoLabels(page);
-  const playersData = await getPlayersData(page, infoLables);
+  const pages = [];
+  const pagesToUse = 4; // Configure this based on the specifications of your computer
+  for (let i = 0; i < pagesToUse; ++i) {
+    const page = await browser.newPage();
+    await page.setRequestInterception(true);
+    page.on("request", onPageRequest);
+    pages.push(page);
+  }
+  const infoLables = await getInfoLabels(pages[0]);
+  const playersData = await getPlayersData(pages, infoLables);
   await writeObjectToFile(playersData);
   await browser.close();
 };
