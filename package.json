@@ -1,7 +1,7 @@
 {
-  "name": "survivor-trivia",
+  "name": "survivor-data",
   "version": "1.0.0",
-  "description": "Survivor trivia game",
+  "description": "Survivor data accumulator",
   "author": "Dave Kwiatkowski",
   "license": "MIT",
   "scripts": {
